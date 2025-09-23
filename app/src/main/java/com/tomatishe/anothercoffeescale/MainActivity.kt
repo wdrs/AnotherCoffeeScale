@@ -484,6 +484,9 @@ open class MainViewModel(
                             BluetoothProfile.STATE_DISCONNECTED -> {
                                 _globalIsConnecting.value = false
                                 _globalIsConnected.value = false
+                                if (internalIsRunning) {
+                                    pauseTimer()
+                                }
                             }
                         }
                     }
@@ -579,10 +582,8 @@ open class MainViewModel(
                 }
             } else if (isAutoStart.value) {
                 // Автостарт - условие увеличения веса >0.2 и прошлый вес незначителен
-                if (newWeight - lastWeight > 0.2 && lastWeight <= WEIGHT_THRESHOLD) {
-                    if (!_isRunning.value) {
-                        startTimer()
-                    }
+                if (newWeight - lastWeight > 0.2 && _globalWeightPoints.isEmpty()) {
+                    startTimer()
                 }
             }
         }
@@ -857,6 +858,8 @@ open class MainViewModel(
         _globalWeightPoints.clear()
         _globalFlowRatePoints.clear()
         _globalWeight.doubleValue = 0.0
+        _globalWeightFlow.value = 0.0
+        lastWeight = 0.0
         _globalDoze.doubleValue = 0.0
         _globalFlowRate.doubleValue = 0.0
         _globalTime.doubleValue = 0.0
@@ -1136,7 +1139,6 @@ fun ChartCard(
     modifier: Modifier,
     weightPoints: List<WeightPoint>,
 ) {
-    val accumulatedTimes = remember { mutableStateListOf<String>() }
     val accumulatedWeights = remember { mutableStateListOf<Double>() }
 
     fun formatTime(seconds: Double): String {
@@ -1177,12 +1179,7 @@ fun ChartCard(
         if (weightPoints.isEmpty()) listOf(0.0) else weightPoints.map { it.weight }
     }
 
-    val newLabels = timeLabelsStrings.drop(accumulatedTimes.size)
     val newWeights = weights.drop(accumulatedWeights.size)
-
-    if (newLabels.isNotEmpty()) {
-        accumulatedTimes.addAll(newLabels)
-    }
 
     if (newWeights.isNotEmpty()) {
         accumulatedWeights.addAll(newWeights)
@@ -1190,10 +1187,6 @@ fun ChartCard(
 
     if (accumulatedWeights.size > weights.size) {
         accumulatedWeights.clear()
-    }
-
-    if (accumulatedTimes.size > timeLabelsStrings.size) {
-        accumulatedTimes.clear()
     }
 
     Card(
@@ -1231,7 +1224,7 @@ fun ChartCard(
                         Color.Black
                     }, fontSize = 12.sp
                 ),
-                labels = accumulatedTimes,
+                labels = timeLabelsStrings,
             ),
             labelHelperProperties = LabelHelperProperties(
                 enabled = true,
