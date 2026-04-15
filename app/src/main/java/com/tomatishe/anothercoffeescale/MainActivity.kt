@@ -27,6 +27,7 @@ import androidx.annotation.RequiresPermission
 import androidx.compose.animation.core.EaseInOutCubic
 import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
@@ -36,6 +37,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -47,6 +49,7 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckBox
 import androidx.compose.material.icons.filled.CheckBoxOutlineBlank
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.LocalCafe
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.MoreVert
@@ -54,18 +57,22 @@ import androidx.compose.material.icons.filled.PauseCircle
 import androidx.compose.material.icons.filled.PlayCircle
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Save
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Start
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
+import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.MenuDefaults
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.NavigationRail
@@ -77,6 +84,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.adaptive.ExperimentalMaterial3AdaptiveApi
 import androidx.compose.material3.adaptive.currentWindowDpSize
+import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.getValue
@@ -87,6 +95,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.State
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.snapshots.SnapshotStateList
@@ -139,6 +149,12 @@ import kotlinx.coroutines.withTimeout
 import java.util.UUID
 import kotlin.collections.emptyList
 import kotlin.math.min
+
+enum class Screen {
+    Main,
+    History,
+    Settings
+}
 
 data class WeightPoint(val timeSeconds: Double, val weight: Double)
 
@@ -1087,9 +1103,7 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         setContent {
             AnotherCoffeeScaleTheme {
-                MainScreen(
-                    toolBarText = "Заваривание"
-                )
+                MainScreen()
             }
         }
     }
@@ -1372,10 +1386,65 @@ fun AutomationMenu(
     }
 }
 
+@Composable
+private fun DrawerItem(
+    text: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    selected: Boolean,
+    onClick: () -> Unit
+) {
+    androidx.compose.material3.NavigationDrawerItem(
+        icon = { Icon(icon, contentDescription = null) },
+        label = { Text(text) },
+        selected = selected,
+        onClick = onClick,
+        modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)
+    )
+}
+
+@Composable
+fun SideMenu(
+    onSelectScreen: (Screen) -> Unit,
+    currentScreen: Screen,
+    modifier: Modifier = Modifier
+) {
+    Column(
+        modifier = modifier
+            .fillMaxHeight()
+            .background(MaterialTheme.colorScheme.surface)
+            .padding(vertical = 16.dp)
+    ) {
+        Text(
+            "Another Coffee Scale",
+            style = MaterialTheme.typography.titleLarge,
+            modifier = Modifier.padding(start = 28.dp, bottom = 16.dp)
+        )
+
+        DrawerItem(
+            text = "Заваривание",
+            icon = Icons.Filled.LocalCafe,
+            selected = currentScreen == Screen.Main,
+            onClick = { onSelectScreen(Screen.Main) }
+        )
+        DrawerItem(
+            text = "История",
+            icon = Icons.Filled.History,
+            selected = currentScreen == Screen.History,
+            onClick = { onSelectScreen(Screen.History) }
+        )
+        DrawerItem(
+            text = "Настройки",
+            icon = Icons.Filled.Settings,
+            selected = currentScreen == Screen.Settings,
+            onClick = { onSelectScreen(Screen.Settings) }
+        )
+    }
+}
+
 @OptIn(ExperimentalMaterial3AdaptiveApi::class, ExperimentalMaterial3Api::class)
 @Composable
 fun MainScreen(
-    toolBarText: String, mainViewModel: MainViewModel = viewModel(
+    mainViewModel: MainViewModel = viewModel(
         factory = MainViewModelFactory(LocalContext.current)
     ),
     onConnectionButtonClick: (() -> Unit)? = null,
@@ -1446,6 +1515,33 @@ fun MainScreen(
         configuration.orientation == android.content.res.Configuration.ORIENTATION_PORTRAIT
     val screenWidthDp = currentWindowDpSize().width
     val isMediumBreakpoint = screenWidthDp > 599.dp
+
+    val scope = rememberCoroutineScope()
+
+    // Состояние текущего экрана
+    val currentScreen = rememberSaveable { mutableStateOf(Screen.Main) }
+
+    // Функция для переключения drawer
+    val drawerState = rememberDrawerState(DrawerValue.Closed)
+
+    fun toggleDrawer() {
+        scope.launch {
+            if (drawerState.isClosed) drawerState.open() else drawerState.close()
+        }
+    }
+
+    fun selectScreen(screen: Screen) {
+        currentScreen.value = screen
+        scope.launch { drawerState.close() }
+    }
+
+    // Заголовок TopAppBar в зависимости от экрана
+    val topAppBarTitle = when (currentScreen.value) {
+        Screen.Main -> "Заваривание"
+        Screen.History -> "История"
+        Screen.Settings -> "Настройки"
+    }
+
 
     if (showDozeDialog) {
         DoseEditDialog(
@@ -1636,65 +1732,111 @@ fun MainScreen(
         }
     }
 
-    Scaffold(topBar = {
-        TopAppBar(
-            title = {
-                Text(
-                    toolBarText, overflow = TextOverflow.Ellipsis,
-                    textAlign = TextAlign.Center,
-                    maxLines = 1,
-                )
-            },
-            navigationIcon = {
-                IconButton(onClick = { /* "Open nav drawer" */ }) {
-                    Icon(Icons.Filled.Menu, contentDescription = "Меню")
-                }
-            },
-            actions = {
-                IconButton(onClick = {
-                    mainViewModel.resetTimer()
-                    if (isConnected) {
-                        mainViewModel.resetScale()
+    ModalNavigationDrawer(
+        drawerState = drawerState,
+        drawerContent = {
+            SideMenu(
+                onSelectScreen = { screen -> selectScreen(screen) },
+                currentScreen = currentScreen.value
+            )
+        }
+    ) {
+        Scaffold(topBar = {
+            TopAppBar(
+                title = {
+                    Text(
+                        topAppBarTitle, overflow = TextOverflow.Ellipsis,
+                        textAlign = TextAlign.Center,
+                        maxLines = 1,
+                    )
+                },
+                navigationIcon = {
+                    IconButton(onClick = { toggleDrawer() }) {
+                        Icon(Icons.Filled.Menu, contentDescription = "Меню")
                     }
-                }) {
-                    Icon(
-                        imageVector = Icons.Filled.Refresh, contentDescription = "Сброс"
-                    )
-                }
-                IconButton(onClick = { /* do something */ }) {
-                    Icon(
-                        imageVector = Icons.Filled.Save, contentDescription = "Сохранить"
-                    )
-                }
-                AutomationMenu(
-                    isAutoStart = isAutoStart,
-                    isAutoDose = isAutoDose,
-                    isAutoTare = isAutoTare,
-                    onAutoStartChanged = { mainViewModel.updateAutoStart(it) },
-                    onAutoDoseChanged = { mainViewModel.updateAutoDose(it) },
-                    onAutoTareChanged = { mainViewModel.updateAutoTare(it) }
-                )
-            },
-        )
-    }, bottomBar = {
-        if (isPortrait && !isMediumBreakpoint) {
-            NavigationContent()
-        } else null
-    }, content = { innerPadding ->
-        if (!isPortrait || isMediumBreakpoint) {
-            Row(
-                modifier = Modifier
-                    .padding(innerPadding)
-                    .fillMaxSize()
-            ) {
-                Column(
-                    modifier = Modifier
-                        .weight(1f)
-                        .fillMaxHeight()
-                        .padding(end = 4.dp),
-                    verticalArrangement = Arrangement.Top
-                ) {
-                    if (isPortrait) {
+                },
+                actions = {
+                    if (currentScreen.value == Screen.Main) {
+                        IconButton(onClick = {
+                            mainViewModel.resetTimer()
+                            if (isConnected) {
+                                mainViewModel.resetScale()
+                            }
+                        }) {
+                            Icon(
+                                imageVector = Icons.Filled.Refresh, contentDescription = "Сброс"
+                            )
+                        }
+                        IconButton(onClick = { /* TODO: сохранить заваривание */ }) {
+                            Icon(
+                                imageVector = Icons.Filled.Save, contentDescription = "Сохранить"
+                            )
+                        }
+                        AutomationMenu(
+                            isAutoStart = isAutoStart,
+                            isAutoDose = isAutoDose,
+                            isAutoTare = isAutoTare,
+                            onAutoStartChanged = { mainViewModel.updateAutoStart(it) },
+                            onAutoDoseChanged = { mainViewModel.updateAutoDose(it) },
+                            onAutoTareChanged = { mainViewModel.updateAutoTare(it) }
+                        )
+                    }
+                },
+            )
+        }, bottomBar = {
+            if (currentScreen.value == Screen.Main && isPortrait && !isMediumBreakpoint) {
+                NavigationContent()
+            } else null
+        }, content = { innerPadding ->
+            when (currentScreen.value) {
+                Screen.Main -> {
+                    if (!isPortrait || isMediumBreakpoint) {
+                        Row(
+                            modifier = Modifier
+                                .padding(innerPadding)
+                                .fillMaxSize()
+                        ) {
+                            Column(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .fillMaxHeight()
+                                    .padding(end = 4.dp),
+                                verticalArrangement = Arrangement.Top
+                            ) {
+                                if (isPortrait) {
+                                    PortraitContent(
+                                        globalWeight = weightText,
+                                        globalDoze = dozeText,
+                                        globalFlow = flowText,
+                                        globalTime = timeText,
+                                        globalRatio = ratioText,
+                                        weightPoints = weightPoints,
+                                        flowRatePoints = flowRatePoints,
+                                        innerPadding = innerPadding,
+                                        onDozeClick = { showDozeDialog = true }
+                                    )
+                                } else {
+                                    LandscapeContent(
+                                        globalWeight = weightText,
+                                        globalDoze = dozeText,
+                                        globalFlow = flowText,
+                                        globalTime = timeText,
+                                        globalRatio = ratioText,
+                                        weightPoints = weightPoints,
+                                        flowRatePoints = flowRatePoints,
+                                        innerPadding = innerPadding,
+                                        onDozeClick = { showDozeDialog = true }
+                                    )
+                                }
+                            }
+                            Column(
+                                modifier = Modifier.fillMaxHeight(),
+                                verticalArrangement = Arrangement.spacedBy(1.dp)
+                            ) {
+                                NavigationRailContent()
+                            }
+                        }
+                    } else {
                         PortraitContent(
                             globalWeight = weightText,
                             globalDoze = dozeText,
@@ -1704,65 +1846,99 @@ fun MainScreen(
                             weightPoints = weightPoints,
                             flowRatePoints = flowRatePoints,
                             innerPadding = innerPadding,
-                            onDozeClick = {
-                                showDozeDialog = true
-                            }
-                        )
-                    } else {
-                        LandscapeContent(
-                            globalWeight = weightText,
-                            globalDoze = dozeText,
-                            globalFlow = flowText,
-                            globalTime = timeText,
-                            globalRatio = ratioText,
-                            weightPoints = weightPoints,
-                            flowRatePoints = flowRatePoints,
-                            innerPadding = innerPadding,
-                            onDozeClick = {
-                                showDozeDialog = true
-                            }
+                            onDozeClick = { showDozeDialog = true }
                         )
                     }
                 }
-                Column(
-                    modifier = Modifier.fillMaxHeight(),
-                    verticalArrangement = Arrangement.spacedBy(1.dp)
-                ) {
-                    NavigationRailContent()
+
+                Screen.History -> {
+                    Row(
+                        modifier = Modifier
+                            .padding(innerPadding)
+                            .fillMaxSize()
+                    ) {
+                        HistoryScreen()
+                    }
+                }
+
+                Screen.Settings -> {
+                    Row(
+                        modifier = Modifier
+                            .padding(innerPadding)
+                            .fillMaxSize()
+                    ) {
+                        SettingsScreen()
+                    }
                 }
             }
-        } else {
-            if (isPortrait) {
-                PortraitContent(
-                    globalWeight = weightText,
-                    globalDoze = dozeText,
-                    globalFlow = flowText,
-                    globalTime = timeText,
-                    globalRatio = ratioText,
-                    weightPoints = weightPoints,
-                    flowRatePoints = flowRatePoints,
-                    innerPadding = innerPadding,
-                    onDozeClick = {
-                        showDozeDialog = true
-                    }
-                )
-            } else {
-                LandscapeContent(
-                    globalWeight = weightText,
-                    globalDoze = dozeText,
-                    globalFlow = flowText,
-                    globalTime = timeText,
-                    globalRatio = ratioText,
-                    weightPoints = weightPoints,
-                    flowRatePoints = flowRatePoints,
-                    innerPadding = innerPadding,
-                    onDozeClick = {
-                        showDozeDialog = true
-                    }
+        })
+    }
+}
+
+@Composable
+fun HistoryScreen() {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(16.dp)
+    ) {
+        Text("История", style = MaterialTheme.typography.titleLarge)
+        Spacer(modifier = Modifier.height(8.dp))
+        Text(
+            "Здесь будут сохранённые заваривания",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // Заглушка — в будущем здесь будет список записей
+        Card(
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(
+                modifier = Modifier.padding(16.dp)
+            ) {
+                Text("Пока нет записей", style = MaterialTheme.typography.titleSmall)
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    "Сохраняйте заваривания с основного экрана, " +
+                        "чтобы отслеживать прогресс и сравнивать рецепты.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
         }
-    })
+    }
+}
+
+@Composable
+fun SettingsScreen() {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(16.dp)
+    ) {
+        Text("Настройки", style = MaterialTheme.typography.titleLarge)
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // Заглушка — в будущем здесь будут полноценные настройки
+        Card(
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(
+                modifier = Modifier.padding(16.dp)
+            ) {
+                Text("Настройки в разработке", style = MaterialTheme.typography.titleSmall)
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    "Здесь можно будет настроить параметры по умолчанию, " +
+                        "пропорции графиков и видимость элементов.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+    }
 }
 
 @Composable
@@ -1784,11 +1960,11 @@ fun PortraitContent(
         verticalArrangement = Arrangement.spacedBy(1.dp)
     ) {
         Row(
-            modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(1.dp)
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 5.dp),
+            horizontalArrangement = Arrangement.spacedBy(1.dp)
         ) {
-            SmallInfoCard(
-                label = "Вес", cardValue = globalWeight, modifier = Modifier.weight(1f)
-            )
             SmallInfoCard(
                 label = "Доза",
                 cardValue = globalDoze,
@@ -1796,11 +1972,17 @@ fun PortraitContent(
                 onClick = onDozeClick
             )
             SmallInfoCard(
+                label = "Вес", cardValue = globalWeight, modifier = Modifier.weight(1f)
+            )
+            SmallInfoCard(
                 label = "Скорость пролива", cardValue = globalFlow, modifier = Modifier.weight(1f)
             )
         }
         Row(
-            modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(1.dp)
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 5.dp),
+            horizontalArrangement = Arrangement.spacedBy(1.dp)
         ) {
             SmallInfoCard(
                 label = "Время", cardValue = globalTime, modifier = Modifier.weight(1f)
@@ -1812,6 +1994,7 @@ fun PortraitContent(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
+                .padding(horizontal = 5.dp)
                 .weight(1f),
             horizontalArrangement = Arrangement.spacedBy(1.dp)
         ) {
@@ -1847,7 +2030,10 @@ fun LandscapeContent(
         modifier = Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(1.dp)
     ) {
         Row(
-            modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(1.dp)
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 5.dp),
+            horizontalArrangement = Arrangement.spacedBy(1.dp)
         ) {
             Row(
                 modifier = Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(1.dp)
@@ -1881,6 +2067,7 @@ fun LandscapeContent(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
+                .padding(horizontal = 5.dp)
                 .weight(1f),
             horizontalArrangement = Arrangement.spacedBy(1.dp),
         ) {
@@ -1913,12 +2100,15 @@ fun MainScreenPreview() {
     val fakeViewModel = remember { FakeMainViewModel() }
     AnotherCoffeeScaleTheme {
         MainScreen(
-            toolBarText = "Заваривание", mainViewModel = fakeViewModel, onConnectionButtonClick = {
+            mainViewModel = fakeViewModel,
+            onConnectionButtonClick = {
                 val connectedState = fakeViewModel.globalIsConnected as MutableState<Boolean>
                 connectedState.value = !connectedState.value
-            }, onDozeButtonClick = {
+            },
+            onDozeButtonClick = {
                 val dozeValue = fakeViewModel.globalDoze as MutableState<Double>
                 dozeValue.value = 42.0
-            })
+            }
+        )
     }
 }
